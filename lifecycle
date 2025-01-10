@@ -1,0 +1,105 @@
+   
+ <#
+ Need to pull patch dates
+    https://learn.microsoft.com/en-us/lifecycle/products/microsoft-sql-server-2005
+    https://learn.microsoft.com/en-us/lifecycle/products/microsoft-sql-server-2008
+    https://learn.microsoft.com/en-us/lifecycle/products/microsoft-sql-server-2008-r2
+    https://learn.microsoft.com/en-us/lifecycle/products/microsoft-sql-server-2012
+    https://learn.microsoft.com/en-us/lifecycle/products/sql-server-2014
+    https://learn.microsoft.com/en-us/lifecycle/products/sql-server-2016
+    https://learn.microsoft.com/en-us/lifecycle/products/sql-server-2017
+    https://learn.microsoft.com/en-us/lifecycle/products/sql-server-2019
+    https://learn.microsoft.com/en-us/lifecycle/products/sql-server-2022
+#>
+
+   $SqlVersion = "2008", "2008-r2", "2012", "2014", "2016", "2017","2019","2022"
+   $urlbase = "https://learn.microsoft.com/en-us/lifecycle/products/"
+   
+  
+
+   ForEach ($version in $SqlVersion)
+   {
+   
+   switch ($version)
+   {
+    "2005" {$url=$urlbase+"microsoft-sql-server-$version"}
+    "2008" {$url=$urlbase+"microsoft-sql-server-$version"}
+    "2008-r2"{$url=$urlbase+"microsoft-sql-server-$version"}
+    "2012" {$url=$urlbase+"microsoft-sql-server-$version"}
+    default {$url=$urlbase+"sql-server-$version"}
+    
+   }  
+
+    Write-Host "Pulling Master SQL Lifecycle info from MS for $version - $url" -ForegroundColor Cyan
+   
+    $html=(Invoke-WebRequest -Uri $url -UseBasicParsing).Content 
+
+    #$html | Out-File "c:\temp\enddates-$version.txt"
+
+    
+    # find the version text - MS changed the naming between versions, thanks for that.
+   switch ($version)
+   {
+        "2005"    {$searchstr="<td>Microsoft SQL Server $version</td>"}
+        "2008"    {$searchstr="<td>Microsoft SQL Server $version</td>"}
+        "2008-r2" {$searchstr="<td>Microsoft SQL Server 2008 R2</td>"}
+        "2012"    {$searchstr="<td>Microsoft SQL Server $version</td>"}
+        default   {$searchstr="<td>SQL Server $version</td>"}   
+   }  
+
+
+     $index = $html.IndexOf("$searchstr");
+
+                if ($index -ne -1) {
+                    # find the start of the containing "<tr>"
+                    $tr = $html.LastIndexOf("<tr>", $index);
+
+                    $start = $html.IndexOf("<tr>", $tr) + "<tr>".Length;
+                    $end = $html.IndexOf("</tr>", $tr);
+                    $name = $html.Substring($start, $end - $start);
+
+                                        #Split into muliple rows
+                    
+                    $extract=$name -split "</td>"
+
+                    $detail=@()
+
+                    foreach ($line in $extract){
+                    $start=$null 
+                    $start=$line.IndexOf("datetime=`"")+"datetime=`"".Length
+                                    
+                    #Pull out the date value directly after, ignoring the first line.
+
+                    if ($start -gt 10) {
+                        $detail+=$line.Substring($start,10)
+                        }
+                    }
+
+
+                    $version
+                    $StartDate=$detail[0]
+                    $MainstreamEnd=$detail[1]
+                    $ExtendedEnd=$detail[2]
+
+                     #Build statement to drop it into SQL
+
+                        #$start=$line.IndexOf("datetime")+ "datetime".Length;
+                        #$end=$line.IndexOf(">")
+                        #$date=$line.Substring($start, $end - $start)             
+                    
+                }
+
+   }
+
+
+
+
+
+    #Get info from MS pages - use this for stripping SP/CU levels later
+   
+
+
+    #$html = (Invoke-WebRequest -Uri $url -UseBasicParsing).Content;
+
+    #$out= Invoke-WebRequest $URL -OutFile "c:\temp\enddates-$sqlversion.txt"
+  
