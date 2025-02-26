@@ -11,6 +11,8 @@ Add-Type -Assembly System.Web
 
 <#
 Usage: .\Get-SQLPatchVersions.ps1 -TargetSQLserver MyInventoryServer -TargetSQLDB Inventory -patchfilebasepath c:\temp\SqlServerBuildDL
+
+.\Get-SQLPatchVersions.ps1 -TargetSQLserver localhost -TargetSQLDB Inventory -patchfilebasepath c:\temp\SqlServerBuildDL
 #>
 
 
@@ -149,7 +151,7 @@ catch {
 
 <#
 
-CREATE TABLE SQLPatch (
+CREATE TABLE dbo.SQLPatch (
 	SQLServer varchar(6),
 	Version varchar(4),
 	Build varchar(15),
@@ -170,13 +172,13 @@ CREATE TABLE SQLPatch (
 	Withdrawn bit,
 )
 
-UPDATE SQLPatch SET isSU=1 WHERE Description LIKE '%Security Update%'
+UPDATE dbo.SQLPatch SET isSU=1 WHERE Description LIKE '%Security Update%'
 
-UPDATE SQLPatch
+UPDATE dbo.SQLPatch
 SET CU= CASE WHEN Description LIKE '%(CU%' THEN SUBSTRING(Description, CHARINDEX('(CU',Description)+3, (CHARINDEX(')',Description)-1)-(CHARINDEX('(CU',Description)+2)) END
 WHERE isCU=1 and CU=0
 
-UPDATE SQLPatch
+UPDATE dbo.SQLPatch
  SET SP=CASE WHEN Description LIKE '%Service Pack%' THEN SUBSTRING(Description, CHARINDEX('Service Pack', Description)+13,(CHARINDEX('(', Description))-(CHARINDEX('Service Pack', Description)+13) ) END
  where isSP =1 and SP=0 
 
