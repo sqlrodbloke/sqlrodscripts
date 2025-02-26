@@ -152,8 +152,8 @@ catch {
 <#
 
 CREATE TABLE dbo.SQLPatch (
-	SQLServer varchar(6),
-	Version varchar(4),
+	SQLServer varchar(10),
+	Version varchar(10),
 	Build varchar(15),
 	SP tinyint,
 	CU tinyint,
