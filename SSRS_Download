@@ -1,0 +1,206 @@
+# SSRS Report Download Script
+# Downloads all reports from SQL Server Reporting Services
+
+param(
+    [Parameter(Mandatory=$true)]
+    [string]$ReportServerUrl,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$Username,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$Password,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$Domain,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$OutputPath = ".\SSRSReports",
+    
+    [Parameter(Mandatory=$false)]
+    [string]$Format = "RDL"  # RDL, PDF, Excel, Word, CSV, XML, etc.
+)
+
+# Create output directory if it doesn't exist
+if (!(Test-Path -Path $OutputPath)) {
+    New-Item -ItemType Directory -Path $OutputPath -Force
+    Write-Host "Created output directory: $OutputPath" -ForegroundColor Green
+}
+
+try {
+    # Create SSRS web service proxy
+    Write-Host "Connecting to SSRS: $ReportServerUrl" -ForegroundColor Yellow
+    $ReportServerUri = "$ReportServerUrl/ReportService2010.asmx?WSDL"
+    $proxy = New-WebServiceProxy -Uri $ReportServerUri -UseDefaultCredential
+    
+    # Set credentials if provided
+    if ($Username -and $Password) {
+        if ($Domain) {
+            $proxy.Credentials = New-Object System.Net.NetworkCredential($Username, $Password, $Domain)
+        } else {
+            $proxy.Credentials = New-Object System.Net.NetworkCredential($Username, $Password)
+        }
+        Write-Host "Using provided credentials" -ForegroundColor Yellow
+    } else {
+        Write-Host "Using default credentials" -ForegroundColor Yellow
+    }
+
+    # Get all catalog items (reports, folders, etc.)
+    Write-Host "Retrieving catalog items..." -ForegroundColor Yellow
+    $items = $proxy.ListChildren("/", $true)
+    
+    # Filter for downloadable items
+    $reports = $items | Where-Object { $_.TypeName -eq "Report" }
+    $dataSources = $items | Where-Object { $_.TypeName -eq "DataSource" }
+    $datasets = $items | Where-Object { $_.TypeName -eq "DataSet" }
+    $powerBIReports = $items | Where-Object { $_.TypeName -eq "PowerBIReport" }
+    
+    Write-Host "Found items to download:" -ForegroundColor Green
+    Write-Host "  Reports: $($reports.Count)" -ForegroundColor Green
+    Write-Host "  Data Sources: $($dataSources.Count)" -ForegroundColor Green
+    Write-Host "  Datasets: $($datasets.Count)" -ForegroundColor Green
+    Write-Host "  Power BI Reports: $($powerBIReports.Count)" -ForegroundColor Green
+    
+    $downloadCount = 0
+    $errorCount = 0
+    
+    # Combine all items to download
+    $allItems = @()
+    $allItems += $reports
+    $allItems += $dataSources
+    $allItems += $datasets
+    $allItems += $powerBIReports
+    
+    foreach ($item in $allItems) {
+        try {
+            Write-Host "Downloading [$($item.TypeName)]: $($item.Path)" -ForegroundColor Cyan
+            
+            # Create directory structure
+            $itemDir = Split-Path $item.Path -Parent
+            $fullDir = Join-Path $OutputPath $itemDir.TrimStart('/')
+            if (!(Test-Path -Path $fullDir)) {
+                New-Item -ItemType Directory -Path $fullDir -Force | Out-Null
+            }
+            
+            # Handle different item types
+            switch ($item.TypeName) {
+               
+               
+                "Report" {
+                    if ($Format.ToUpper() -eq "RDL") {
+                        # Download RDL (report definition)
+                        $itemDef = $proxy.GetItemDefinition($item.Path)
+                        $fileName = "$($item.Name).rdl"
+                        $filePath = Join-Path $fullDir $fileName
+                        [System.IO.File]::WriteAllBytes($filePath, $itemDef)
+                    } else {
+                        # Render report in specified format
+                        $deviceInfo = $null
+                        $extension = $null
+                        $mimeType = $null
+                        $encoding = $null
+                        $warnings = $null
+                        $streamIds = $null
+                        
+                        $reportBytes = $proxy.Render(
+                            $item.Path,
+                            $Format,
+                            $deviceInfo,
+                            [ref]$extension,
+                            [ref]$mimeType,
+                            [ref]$encoding,
+                            [ref]$warnings,
+                            [ref]$streamIds
+                        )
+                        
+                        $fileName = "$($item.Name).$($extension)"
+                        $filePath = Join-Path $fullDir $fileName
+                        [System.IO.File]::WriteAllBytes($filePath, $reportBytes)
+                    }
+                }
+                "DataSource" {
+                    # Download data source definition
+                    $itemDef = $proxy.GetItemDefinition($item.Path)
+                    $fileName = "$($item.Name).rds"
+                    $filePath = Join-Path $fullDir $fileName
+                    [System.IO.File]::WriteAllBytes($filePath, $itemDef)
+                }
+                "DataSet" {
+                    # Download dataset definition
+                    $itemDef = $proxy.GetItemDefinition($item.Path)
+                    $fileName = "$($item.Name).rsd"
+                    $filePath = Join-Path $fullDir $fileName
+                    [System.IO.File]::WriteAllBytes($filePath, $itemDef)
+                }
+               
+                "PowerBIReport" {
+                    try {
+
+                         Write-Host "  Attempting to download Power BI Report Server file..." -ForegroundColor Yellow
+                                                 
+                            $fileName = "$($item.Name).pbix"
+                            $filePath = Join-Path $fullDir $fileName
+                                                        
+                            # Method 2: Use ReportingServicesTools module
+                            $altUrl = "$($ReportServerUrl.TrimEnd('/').Replace('/reportserver', '/reports'))" 
+                             Out-RsRestCatalogItem -RsItem $item.Path -Destination $fullDir -ReportPortalUri $altUrl
+
+                             #Out-RsRestCatalogItem -RsItem "/UsageReports/ExecutionStatistics" -Destination "E:\Temp\SSRS_Backup\DC1SS\UsageReports" -ReportPortalUri "http://selfservicereports-ldn/reports"
+    
+                             Write-Host "  Downloaded via ReportServicesTools module: $filePath" -ForegroundColor Green                
+                   
+                    }
+
+                     catch {
+                            # For Power BI Report Server, try different methods to get the .pbix file
+                        
+                                 Write-Host "Error downloading with ReportingServices Module: $($_.Exception.Message)" -ForegroundColor Red
+                                 Write-Host "Please check Modeul operation and access." -ForegroundColor Yellow
+                      
+                            }
+
+                           
+
+                }
+                default {
+                    Write-Host "  Skipping unsupported item type: $($item.TypeName)" -ForegroundColor Yellow
+                    continue
+                }
+            }
+            
+            Write-Host "  Saved: $filePath" -ForegroundColor Green
+            $downloadCount++
+            
+        } catch {
+            Write-Host "  Error downloading $($item.Path): $($_.Exception.Message)" -ForegroundColor Red
+            $errorCount++
+        }
+    }
+    
+    Write-Host "`nDownload Summary:" -ForegroundColor Yellow
+    Write-Host "  Successfully downloaded: $downloadCount items" -ForegroundColor Green
+    Write-Host "  Errors: $errorCount items" -ForegroundColor Red
+    Write-Host "  Output location: $OutputPath" -ForegroundColor Yellow
+    
+       
+} catch {
+    Write-Host "Error connecting to SSRS: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "Please verify the Report Server URL and credentials." -ForegroundColor Yellow
+}
+
+# Usage examples:
+# Basic SSRS download (reports, data sources, datasets):
+# .\Download-SSRSReports.ps1 -ReportServerUrl "http://selfservicereports-ldn/Reports" -Outputpath E:\Temp\SSRS_Backup\DC1SS
+# .\Download-SSRSReports.ps1 -ReportServerUrl "http://server/ReportServer" -Username "domain\user" -Password "password"
+
+# Download with Power BI reports (requires Azure AD app registration):
+# .\Download-SSRSReports.ps1 -ReportServerUrl "http://server/ReportServer" -DownloadPowerBIReports -PowerBITenantId "your-tenant-id" -PowerBIClientId "your-client-id" -PowerBIClientSecret "your-client-secret"
+
+# File extensions by item type:
+# - Reports: .rdl (or specified format like .pdf, .xlsx)
+# - Data Sources: .rds
+# - Datasets: .rsd  
+# - Power BI Reports: .pbix (via Power BI REST API) or _metadata.json (SSRS catalog info only)
+
+# Note: Power BI reports in SSRS cannot be downloaded as .pbix files through the SSRS web service.
+# They require Power BI REST API access with proper Azure AD app registration and permissions.
